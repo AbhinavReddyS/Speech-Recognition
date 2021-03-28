@@ -250,92 +250,6 @@ def generate_word_wfst(f, start_state, word):
     
     return f
 
-
-def generate_parallel_path_wfst(f, start_state, n):
-    current_state = start_state
-    next_state = f.add_state()
-    for i in range(n):
-
-        # self-loop back to current state
-        f.add_arc(current_state, fst.Arc(0, 0, None, current_state))
-        f.add_arc(current_state, fst.Arc(0, 0, None, next_state))
-        if i != n-1:
-            next_next_state = f.add_state()
-            f.add_arc(current_state, fst.Arc(0, 0, None, next_next_state))
-        current_state = next_state
-        next_state = next_next_state
-
-    return current_state
-
-def generate_ergodic_wfst(f, start_state, n):
-
-    current_state = start_state
-    
-    for i in range(n):
-        f.add_state()
-        
-    for i in range(n+1): # +1 is start state
-        for j in range(n+1):
-            f.add_arc(i, fst.Arc(0, 0, None, j))
-
-    return current_state
-
-
-def generate_phone_recognition_wfst(n):
-    
-    f = fst.Fst()
-    
-    # create a single start state
-    start_state = f.add_state()
-    f.set_start(start_state)
-    
-    # get a list of all the phones in the lexicon
-    # there are lots of way to do this.  Here, we use the set() object
-
-    # will contain all unique phones in the lexicon
-    phone_set = set()
-    
-    for pronunciation in lex.values():
-        phone_set = phone_set.union(pronunciation)
-        
-    for phone in phone_set:
-        
-        # we need to add an empty arc from the start state to where the actual phone HMM
-        # will begin.  If you can't see why this is needed, try without it!
-        current_state = f.add_state()
-        f.add_arc(start_state, fst.Arc(0, 0, None, current_state))
-    
-        end_state = generate_phone_wfst(f, current_state, phone, n)
-    
-        f.set_final(end_state)
-
-    return f
-
-def generate_phone_sequence_recognition_wfst(n):
-    """ generate a HMM to recognise any single phone sequence in the lexicon"""
-    
-    f = fst.Fst()
-    
-    # create a single start state
-    start_state = f.add_state()
-    f.set_start(start_state)
-    
-    phone_set = set()
-    
-    for pronunciation in lex.values():
-        phone_set = phone_set.union(pronunciation)
-        
-    for phone in phone_set:
-        current_state = f.add_state()
-        f.add_arc(start_state, fst.Arc(0, 0, None, current_state))
-    
-        end_state = generate_phone_wfst(f, current_state, phone, n)
-        
-        f.add_arc(end_state, fst.Arc(0,0, None, start_state))
-        f.set_final(end_state)
-
-    return f
-
 def generate_word_sequence_recognition_wfst(n, lex, phone_table, state_table):
     """ generate a HMM to recognise any single word sequence for words in the lexicon
     """
@@ -361,65 +275,6 @@ def generate_word_sequence_recognition_wfst(n, lex, phone_table, state_table):
         
     return f
 
-def sample_random_path_prob(f):
-    '''Given an FST, randomly sample a path through it and compute the negative log probability.
-        '''
-    curr_state = f.start() # start from beginning
-    weight_type = f.weight_type() # type of weights used in the fst
-    input_label_seq = []
-    output_label_seq = []
-    neg_log_prob = 0.0 # log(1) = 0
-
-    while f.final(curr_state) == fst.Weight(weight_type, 'inf'): # the .final method returns the probability of a state being final
-                                                             # it's infinite when the state is NOT final
-        arc_list = list(f.arcs(curr_state))
-        sampled_arc = random.sample(arc_list, 1)[0] # random.sample returns a list, [0] is to get the arc inside
-        ilabel = state_table.find(sampled_arc.ilabel) # search the index in the table, get the string
-        input_label_seq.append(ilabel)
-        
-        olabel = phone_table.find(sampled_arc.olabel)
-        output_label_seq.append(olabel)
-        
-        curr_state = sampled_arc.nextstate
-        
-        # Addition:
-        neg_log_prob += float(sampled_arc.weight) # transition probability
-        
-    return input_label_seq, output_label_seq, neg_log_prob
-
-def sample_random_path_obs_prob(f):
-    '''Given an FST and observation probabilities, randomly sample a path
-        through it and compute the negative log probability.
-        '''
-    
-    # Addition:
-    t = 1
-    curr_state = f.start() # start from beginning
-    weight_type = f.weight_type() # type of weights used in the fst
-    input_label_seq = []
-    output_label_seq = []
-    neg_log_prob = 0.0 # log(1) = 0
-
-    while f.final(curr_state) == fst.Weight(weight_type, 'inf'): # the .final method returns the probability of a state being final
-                                                             # it's infinite when the state is NOT final
-        arc_list = list(f.arcs(curr_state))
-        sampled_arc = random.sample(arc_list, 1)[0] # random.sample returns a list, [0] is to get the arc inside
-        ilabel = state_table.find(sampled_arc.ilabel) # search the index in the table, get the string
-        input_label_seq.append(ilabel)
-        
-        olabel = phone_table.find(sampled_arc.olabel)
-        output_label_seq.append(olabel)
-        
-        curr_state = sampled_arc.nextstate
-        
-        neg_log_prob += float(sampled_arc.weight) # transition probability
-        
-        # Addition:
-        neg_log_prob -= math.log(observation_probability(ilabel, t)) # emission probability
-        t += 1 # going to the next step in the sequence
-        
-    return input_label_seq, output_label_seq, neg_log_prob
-
 def read_transcription(wav_file):
     """
     Get the transcription corresponding to wav_file.
@@ -432,27 +287,41 @@ def read_transcription(wav_file):
     
     return transcription
 
-    
+def phones_to_words(s, dic, result):
+        if not s:          
+            return ' '.join([dic[x] for x in result])
+        j = 0
+        s = s.strip()
+        while j < len(s):
+            if s[:j+1] in dic:
+                result.append(s[:j+1])
+                ans = phones_to_words(s[j+1:], dic, result)
+                if ans:
+                    return ans
+                result.pop()
+            j+=1
+
 if __name__ == "__main__":
     
     lex = parse_lexicon('lexicon.txt')
+    phone_to_word = {' '.join(lex[x]):x for x in lex}
     word_table, phone_table, state_table = generate_symbol_tables(lex)
-    
+
     f = generate_word_sequence_recognition_wfst(3, lex, phone_table, state_table)
     f.set_input_symbols(state_table)
     f.set_output_symbols(phone_table)
     for wav_file in glob.glob('/group/teaching/asr/labs/recordings/*.wav'):    # replace path if using your own                                                                         # audio files
         
         decoder = MyViterbiDecoder(f, wav_file)
-        #comment
+        words = []
         decoder.decode()
-        (state_path, words) = decoder.backtrace()  # you'll need to modify the backtrace() from Lab 4
+        (state_path, phones) = decoder.backtrace()  # you'll need to modify the backtrace() from Lab 4
                                                 # to return the words along the best path
-        
+        words = phones_to_words(phones, phone_to_word, words)
         transcription = read_transcription(wav_file)
         error_counts = wer.compute_alignment_errors(transcription, words)
         word_count = len(transcription.split())
         
-        print(error_counts, word_count)     # you'll need to accumulate these to produce an overall Word Error Rate
+        print(sum(error_counts)/word_count)     # you'll need to accumulate these to produce an overall Word Error Rate
         
 
