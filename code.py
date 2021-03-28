@@ -320,8 +320,8 @@ if __name__ == "__main__":
     f = generate_word_sequence_recognition_wfst(3, lex)
     f.set_input_symbols(state_table)
     f.set_output_symbols(phone_table)
-    N, WE, decode_time, backtrace_time, utterances, forward_ops = 0, 0, 0, 0, 0, 0
-    for wav_file in glob.glob('/group/teaching/asr/labs/recordings/*.wav'):    # replace path if using your own                                                                         # audio files
+    WER, decode_time, backtrace_time, utterances, forward_ops = 0, 0, 0, 0, 0
+    for wav_file in glob.glob('/group/teaching/asr/labs/recordings/000?.wav'):    # replace path if using your own                                                                         # audio files
         utterances += 1
         decoder = MyViterbiDecoder(f, wav_file)
         words = []
@@ -338,14 +338,11 @@ if __name__ == "__main__":
         backtrace_time += end_time - start_time
 
         transcription = read_transcription(wav_file)
-        #print("trans: ", transcription)
-        #print("prediction: ", words, "\n")
         error_counts = wer.compute_alignment_errors(transcription, words)
         word_count = len(transcription.split())
-        N += word_count
-        WE += sum(error_counts)
+        WER += sum(error_counts)/word_count
     print(datetime.now().strftime("%H:%M:%S"))
-    WER = WE/N
+    WER = WER/utterances
     backtrace_time = backtrace_time/utterances
     decode_time = decode_time/utterances
     forward_ops = forward_ops/utterances
