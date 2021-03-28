@@ -6,6 +6,8 @@ import openfst_python as fst
 import math
 from subprocess import check_call
 from IPython.display import Image
+from timeit import default_timer as timer
+from datetime import datetime
 
 class MyViterbiDecoder:
     
@@ -152,6 +154,7 @@ class MyViterbiDecoder:
             self.traverse_epsilon_arcs(t)
             t += 1
         self.finalise_decoding()
+        return t-1
     
     def backtrace(self):
         
@@ -209,7 +212,9 @@ def generate_symbol_tables(lexicon, n=3):
             
     return word_table, phone_table, state_table
 
-def generate_phone_wfst(f, start_state, phone, n, phone_table, state_table ):
+def generate_phone_wfst(f, start_state, phone, n):
+    global count_states
+    global count_arcs
     current_state = start_state
     for i in range(1, n+1):
         
@@ -218,7 +223,7 @@ def generate_phone_wfst(f, start_state, phone, n, phone_table, state_table ):
         sl_weight = fst.Weight('log', -math.log(0.1))  # weight for self-loop
         # self-loop back to current state
         f.add_arc(current_state, fst.Arc(in_label, 0, sl_weight, current_state))
-        
+        count_arcs += 1
         # transition to next state
         
         # we want to output the phone label on the final state
@@ -229,9 +234,10 @@ def generate_phone_wfst(f, start_state, phone, n, phone_table, state_table ):
             out_label = 0   # output empty <eps> label
             
         next_state = f.add_state()
+        count_states += 1
         next_weight = fst.Weight('log', -math.log(0.9)) # weight to next state
         f.add_arc(current_state, fst.Arc(in_label, out_label, next_weight, next_state))    
-       
+        count_arcs += 1
         current_state = next_state
         
     return current_state
@@ -250,29 +256,31 @@ def generate_word_wfst(f, start_state, word):
     
     return f
 
-def generate_word_sequence_recognition_wfst(n, lex, phone_table, state_table):
+def generate_word_sequence_recognition_wfst(n, lex):
     """ generate a HMM to recognise any single word sequence for words in the lexicon
     """
-    
+    global count_states
+    global count_arcs
     f = fst.Fst('log')
     
     # create a single start state
     start_state = f.add_state()
+    count_states += 1
     f.set_start(start_state)
     
     for word, phones in lex.items():
         current_state = f.add_state()
+        count_states += 1
         arc_weight = fst.Weight('log', -math.log(1/len(lex)))
         f.add_arc(start_state, fst.Arc(0, 0, arc_weight, current_state))
-        
+        count_arcs += 1
         for phone in phones: 
-            current_state = generate_phone_wfst(f, current_state, phone, n, phone_table, state_table )
-        # note: new current_state is now set to the final state of the previous phone WFST
+            current_state = generate_phone_wfst(f, current_state, phone, n)
         
         f.set_final(current_state)
         arc_weight = fst.Weight('log', -math.log(1))
         f.add_arc(current_state, fst.Arc(0, 0, arc_weight, start_state))
-        
+        count_arcs += 1
     return f
 
 def read_transcription(wav_file):
@@ -301,27 +309,49 @@ def phones_to_words(s, dic, result):
                 result.pop()
             j+=1
 
+word_table, phone_table, state_table = None, None, None
+count_states, count_arcs = 0, 0
+
 if __name__ == "__main__":
-    
+    print(datetime.now().strftime("%H:%M:%S"))
     lex = parse_lexicon('lexicon.txt')
     phone_to_word = {' '.join(lex[x]):x for x in lex}
     word_table, phone_table, state_table = generate_symbol_tables(lex)
-
-    f = generate_word_sequence_recognition_wfst(3, lex, phone_table, state_table)
+    f = generate_word_sequence_recognition_wfst(3, lex)
     f.set_input_symbols(state_table)
     f.set_output_symbols(phone_table)
+    N, WE, decode_time, backtrace_time, utterances, forward_ops = 0, 0, 0, 0, 0, 0
     for wav_file in glob.glob('/group/teaching/asr/labs/recordings/*.wav'):    # replace path if using your own                                                                         # audio files
-        
+        utterances += 1
         decoder = MyViterbiDecoder(f, wav_file)
         words = []
-        decoder.decode()
-        (state_path, phones) = decoder.backtrace()  # you'll need to modify the backtrace() from Lab 4
-                                                # to return the words along the best path
+        
+        start_time = timer()
+        forward_ops += decoder.decode()
+        end_time = timer()
+        decode_time +=  end_time - start_time
+        
+        start_time = timer()
+        (state_path, phones) = decoder.backtrace() 
         words = phones_to_words(phones, phone_to_word, words)
+        end_time = timer()
+        backtrace_time += end_time - start_time
+
         transcription = read_transcription(wav_file)
+        #print("trans: ", transcription)
+        #print("prediction: ", words, "\n")
         error_counts = wer.compute_alignment_errors(transcription, words)
         word_count = len(transcription.split())
-        
-        print(sum(error_counts)/word_count)     # you'll need to accumulate these to produce an overall Word Error Rate
-        
+        N += word_count
+        WE += sum(error_counts)
+    print(datetime.now().strftime("%H:%M:%S"))
+    WER = WE/N
+    backtrace_time = backtrace_time/utterances
+    decode_time = decode_time/utterances
+    forward_ops = forward_ops/utterances
+    #count_states, count_arcs - Memory stats
+    #WER - Accuracy stats
+    #backtrace_time, decode_time, forward_ops (avg) - Speed stats
+    print(WER, count_states, count_arcs, backtrace_time, decode_time, forward_ops)
+
 
