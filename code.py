@@ -199,7 +199,13 @@ def generate_symbol_tables(lexicon, n=3):
     state_table.add_symbol('<eps>')
     phone_table.add_symbol('<eps>')
     word_table.add_symbol('<eps>')
-    
+    state_table.add_symbol('<eps>')
+    phone_table.add_symbol('sil')
+    state_table.add_symbol('sil_1')
+    state_table.add_symbol('sil_2')
+    state_table.add_symbol('sil_3')
+    state_table.add_symbol('sil_4')
+    #state_table.add_symbol('sil_5')
     for word, phones  in lexicon.items():
         
         word_table.add_symbol(word)
@@ -212,35 +218,6 @@ def generate_symbol_tables(lexicon, n=3):
             
     return word_table, phone_table, state_table
 
-def generate_phone_wfst(f, start_state, phone, n):
-    global count_states
-    global count_arcs
-    current_state = start_state
-    for i in range(1, n+1):
-        
-        in_label = state_table.find('{}_{}'.format(phone, i))
-        
-        sl_weight = fst.Weight('log', -math.log(0.1))  # weight for self-loop
-        # self-loop back to current state
-        f.add_arc(current_state, fst.Arc(in_label, 0, sl_weight, current_state))
-        count_arcs += 1
-        # transition to next state
-        
-        # we want to output the phone label on the final state
-        # note: if outputting words instead this code should be modified
-        if i == n:
-            out_label = phone_table.find(phone)
-        else:
-            out_label = 0   # output empty <eps> label
-            
-        next_state = f.add_state()
-        count_states += 1
-        next_weight = fst.Weight('log', -math.log(0.9)) # weight to next state
-        f.add_arc(current_state, fst.Arc(in_label, out_label, next_weight, next_state))    
-        count_arcs += 1
-        current_state = next_state
-        
-    return current_state
 
 def generate_word_wfst(f, start_state, word):
     """ Generate a WFST for any word in the lexicon, composed of 3-state phone WFSTs.
@@ -255,6 +232,58 @@ def generate_word_wfst(f, start_state, word):
     f.set_final(current_state)
     
     return f
+
+
+def generate_phone_wfst(f, start_state, phone, n):
+    global count_states
+    global count_arcs
+    current_state = start_state
+    for i in range(1, n+1):
+        
+        in_label = state_table.find('{}_{}'.format(phone, i))
+        
+        sl_weight = fst.Weight('log', -math.log(0.5))  # weight for self-loop
+        # self-loop back to current state
+        f.add_arc(current_state, fst.Arc(in_label, 0, sl_weight, current_state))
+        count_arcs += 1
+
+        if i == n:
+            out_label = phone_table.find(phone)
+        else:
+            out_label = 0   # output empty <eps> label
+            
+        next_state = f.add_state()
+        count_states += 1
+        next_weight = fst.Weight('log', -math.log(0.5)) # weight to next state
+        f.add_arc(current_state, fst.Arc(in_label, out_label, next_weight, next_state))    
+        count_arcs += 1
+        current_state = next_state
+        
+    return current_state
+
+def generate_silence(f, start_state, phone, n, end_state):
+    global count_states
+    global count_arcs
+    current_state = start_state
+    for i in range(1, n+1):
+        
+        in_label = state_table.find('{}_{}'.format(phone, i))
+        
+        sl_weight = fst.Weight('log', -math.log(0.7))  # weight for self-loop
+        # self-loop back to current state
+        f.add_arc(current_state, fst.Arc(in_label, 0, sl_weight, current_state))
+        count_arcs += 1
+        if i == n:
+            next_state = end_state
+        else:
+            next_state = f.add_state()
+            count_states += 1
+        next_weight = fst.Weight('log', -math.log(0.3)) # weight to next state
+        f.add_arc(current_state, fst.Arc(in_label, 0, next_weight, next_state))    
+        count_arcs += 1
+        current_state = next_state
+        
+    return current_state
 
 def generate_word_sequence_recognition_wfst(n, lex):
     """ generate a HMM to recognise any single word sequence for words in the lexicon
@@ -276,11 +305,13 @@ def generate_word_sequence_recognition_wfst(n, lex):
         count_arcs += 1
         for phone in phones: 
             current_state = generate_phone_wfst(f, current_state, phone, n)
-        
         f.set_final(current_state)
-        arc_weight = fst.Weight('log', -math.log(1))
-        f.add_arc(current_state, fst.Arc(0, 0, arc_weight, start_state))
-        count_arcs += 1
+        
+        current_state = generate_silence(f, current_state, 'sil', n+1, start_state)
+        
+        #arc_weight = fst.Weight('log', -math.log(0.5))
+        #f.add_arc(current_state, fst.Arc(0, 0, arc_weight, start_state))
+        #count_arcs += 1
     return f
 
 def read_transcription(wav_file):
@@ -320,6 +351,12 @@ if __name__ == "__main__":
     f = generate_word_sequence_recognition_wfst(3, lex)
     f.set_input_symbols(state_table)
     f.set_output_symbols(phone_table)
+    # from subprocess import check_call
+    # from IPython.display import Image
+    # f.draw('tmp.dot', portrait=True)
+    # check_call(['dot','-Tpng','-Gdpi=500','tmp.dot','-o','tmp.png'])
+    # Image(filename='tmp.png')
+
     WER, decode_time, backtrace_time, utterances, forward_ops = 0, 0, 0, 0, 0
     for wav_file in glob.glob('/group/teaching/asr/labs/recordings/000?.wav'):    # replace path if using your own                                                                         # audio files
         utterances += 1
