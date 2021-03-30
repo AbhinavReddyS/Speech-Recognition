@@ -13,8 +13,8 @@ class MyViterbiDecoder:
     
     NLL_ZERO = 1e10  # define a constant representing -log(0).  This is really infinite, but approximate
                      # it here with a very large number
-
-    new_lst = []
+    
+        new_lst = []
     
     def __init__(self, f, audio_file_name):
         """Set up the decoder class with an audio file and WFST f
@@ -105,32 +105,32 @@ class MyViterbiDecoder:
                         if j not in states_to_traverse:
                             states_to_traverse.append(j)
 
-
+    
     def forward_step(self, t):
           
         for i in self.f.states():
-
-                if not self.V[t-1][i] == self.NLL_ZERO:   # no point in propagating states with zero probability
+            
+            if not self.V[t-1][i] == self.NLL_ZERO:   # no point in propagating states with zero probability
+                
+                for arc in self.f.arcs(i):
                     
-                    for arc in self.f.arcs(i):
-                        
-                        if arc.ilabel != 0: # <eps> transitions don't emit an observation
-                            j = arc.nextstate
-                            tp = float(arc.weight)  # transition prob
-                            ep = -self.om.log_observation_probability(self.f.input_symbols().find(arc.ilabel), t)  # emission negative log prob
-                            prob = tp + ep + self.V[t-1][i] # they're logs
-                            if prob < self.V[t][j]:
-                                self.V[t][j] = prob
-                                self.B[t][j] = i
-                                
-                                # store the output labels encountered too
-                                if arc.olabel !=0:
-                                    self.W[t][j] = [arc.olabel]
-                                else:
-                                    self.W[t][j] = []
-        
+                    if arc.ilabel != 0: # <eps> transitions don't emit an observation
+                        j = arc.nextstate
+                        tp = float(arc.weight)  # transition prob
+                        ep = -self.om.log_observation_probability(self.f.input_symbols().find(arc.ilabel), t)  # emission negative log prob
+                        prob = tp + ep + self.V[t-1][i] # they're logs
+                        if prob < self.V[t][j]:
+                            self.V[t][j] = prob
+                            self.B[t][j] = i
+                            
+                            # store the output labels encountered too
+                            if arc.olabel !=0:
+                                self.W[t][j] = [arc.olabel]
+                            else:
+                                self.W[t][j] = []
+                            
 
-    def forward_step_beam_search(self, t):
+        def forward_step_beam_search(self, t):
           
         for i in self.f.states():
 
@@ -187,8 +187,8 @@ class MyViterbiDecoder:
             t += 1
         self.finalise_decoding()
         return t-1
-
     
+
     def backtrace(self):
         
         best_final_state = self.V[-1].index(min(self.V[-1])) # argmin
@@ -220,7 +220,8 @@ def parse_lexicon(lex_file):
     with open(lex_file, 'r') as f:
         for line in f:
             line = line.split()  # split at each space
-            lex[line[0]] = line[1:]  # first field the word, the rest is the phones
+            #lex[line[0]] = line[1:] 
+           lex[line[0]] = line[1:]  # first field the word, the rest is the phones
     return lex
 
 def generate_symbol_tables(lexicon, n=3):
@@ -239,8 +240,9 @@ def generate_symbol_tables(lexicon, n=3):
     state_table.add_symbol('sil_3')
     state_table.add_symbol('sil_4')
     #state_table.add_symbol('sil_5')
-    for word, phones  in lexicon.items():
-        
+    for tuple  in lexicon:
+        word = tuple[0]
+        phones = tuple[1]
         word_table.add_symbol(word)
         
         for p in phones: # for each phone
@@ -250,6 +252,69 @@ def generate_symbol_tables(lexicon, n=3):
                 state_table.add_symbol('{}_{}'.format(p, i))
             
     return word_table, phone_table, state_table
+
+def generate_L_wfst(lex):
+    """ Express the lexicon in WFST form
+    """
+    L = fst.Fst('log')
+    
+    # create a single start state
+    start_state = L.add_state()
+    L.set_start(start_state)
+    arc_weight = fst.Weight('log', -math.log(0.5))
+    for item in lex:
+        phones = item[1]
+        word = item[0]
+        current_state = start_state
+        for (i,phone) in enumerate(phones):
+            next_state = L.add_state()
+            
+            if i == len(phones)-1:
+                # add word output symbol on the final arc
+                L.add_arc(current_state, fst.Arc(phone_table.find(phone), word_table.find(word), arc_weight, next_state))
+            else:
+                L.add_arc(current_state, fst.Arc(phone_table.find(phone),0, arc_weight, next_state))
+            
+            current_state = next_state
+        L.add_arc(current_state, fst.Arc(0, 0, arc_weight, start_state))             
+        #L.set_final(current_state)
+    L.set_final(start_state)
+    L.set_input_symbols(phone_table)
+    L.set_output_symbols(word_table)                      
+    
+    return L
+
+def generate_G_wfst_peter(lex):
+    
+    G = fst.Fst('log')
+    
+    start_state = G.add_state()
+    G.set_start(start_state)
+    
+    prev_state = None
+    
+    for item in lex:
+        w = item[0]
+        current_state = G.add_state()
+        arc_weight = fst.Weight('log', -math.log(0.5))
+        # add transition from the start with cost 1
+        G.add_arc(start_state, fst.Arc(word_table.find(w), word_table.find(w), arc_weight, current_state))
+        
+        # arc from previous word with cost of zero
+        if prev_state:
+            G.add_arc(prev_state, fst.Arc(word_table.find(w), word_table.find(w), fst.Weight('log', -math.log(0.5)), current_state))
+        
+        # <eps> transition back to the start
+        G.add_arc(current_state, fst.Arc(0, 0, fst.Weight('log', -math.log(0.5)), start_state))
+    
+        prev_state = current_state
+    
+    G.set_final(start_state)
+        
+    G.set_input_symbols(word_table)
+    G.set_output_symbols(word_table)  
+ 
+    return G
 
 
 def generate_word_wfst(f, start_state, word):
@@ -320,8 +385,7 @@ def generate_silence(f, start_state, phone, n, end_state):
 
 def generate_word_sequence_recognition_wfst(n, lex):
     """ generate a HMM to recognise any single word sequence for words in the lexicon
-    
-    """
+        """
     global count_states
     global count_arcs
     f = fst.Fst('log')
@@ -331,7 +395,8 @@ def generate_word_sequence_recognition_wfst(n, lex):
     count_states += 1
     f.set_start(start_state)
     
-    for word, phones in lex.items():
+    for tuple in lex:
+        phones = tuple[1]
         current_state = f.add_state()
         count_states += 1
         arc_weight = fst.Weight('log', -math.log(1/len(lex)))
@@ -339,13 +404,16 @@ def generate_word_sequence_recognition_wfst(n, lex):
         count_arcs += 1
         for phone in phones: 
             current_state = generate_phone_wfst(f, current_state, phone, n)
-        f.set_final(current_state)
+        #f.set_final(current_state)
         
         current_state = generate_silence(f, current_state, 'sil', n+1, start_state)
         
         #arc_weight = fst.Weight('log', -math.log(0.5))
         #f.add_arc(current_state, fst.Arc(0, 0, arc_weight, start_state))
         #count_arcs += 1
+    f.set_final(start_state)
+    f.set_input_symbols(state_table)
+    f.set_output_symbols(phone_table) 
     return f
 
 def read_transcription(wav_file):
@@ -380,21 +448,39 @@ count_states, count_arcs = 0, 0
 if __name__ == "__main__":
     print(datetime.now().strftime("%H:%M:%S"))
     lex = parse_lexicon('lexicon.txt')
-    phone_to_word = {' '.join(lex[x]):x for x in lex}
+    phone_to_word = {' '.join(x[1]):x[0] for x in lex}
     word_table, phone_table, state_table = generate_symbol_tables(lex)
-    f = generate_word_sequence_recognition_wfst(3, lex)
-    f.set_input_symbols(state_table)
-    f.set_output_symbols(phone_table)
-    # from subprocess import check_call
-    # from IPython.display import Image
-    # f.draw('tmp.dot', portrait=True)
-    # check_call(['dot','-Tpng','-Gdpi=500','tmp.dot','-o','tmp.png'])
-    # Image(filename='tmp.png')
+    H = generate_word_sequence_recognition_wfst(3, lex)
+    L = generate_L_wfst(lex)
+    #f_det = fst.determinize(f)
+    #f_det.minimize()
+    G = generate_G_wfst_peter(lex)
+    #f_min_det = fst.minimize(f_det)
+    #f_det.set_input_symbols(state_table)
+    #f_det.set_output_symbols(phone_table)
+    H.draw('tmp0.dot', portrait=True)
+    check_call(['dot','-Tpng','-Gdpi=500','tmp0.dot','-o','tmp0.png'])
+    Image(filename='tmp0.png')
 
+    L.draw('tmp.dot', portrait=True)
+    check_call(['dot','-Tpng','-Gdpi=500','tmp.dot','-o','tmp.png'])
+    Image(filename='tmp.png')
+
+    G.draw('tmp1.dot', portrait=True)
+    check_call(['dot','-Tpng','-Gdpi=500','tmp1.dot','-o','tmp1.png'])
+    Image(filename='tmp1.png')
+    HLG = fst.determinize(fst.compose(H, fst.determinize(fst.compose(L, G)).minimize()))
+    HLG.minimize()
+    HLG.set_input_symbols(state_table)
+    HLG.set_output_symbols(word_table) 
+    #fst.determinize(f)
+    # HLG.draw('tmp3.dot', portrait=True)
+    # check_call(['dot','-Tpng','-Gdpi=500','tmp3.dot','-o','tmp3.png'])
+    # Image(filename='tmp3.png')
     WER, decode_time, backtrace_time, utterances, forward_ops = 0, 0, 0, 0, 0
-    for wav_file in glob.glob('/group/teaching/asr/labs/recordings/000?.wav'):    # replace path if using your own                                                                         # audio files
+    for wav_file in glob.glob('/group/teaching/asr/labs/recordings/*.wav'):    # replace path if using your own                                                                         # audio files
         utterances += 1
-        decoder = MyViterbiDecoder(f, wav_file)
+        decoder = MyViterbiDecoder(HLG, wav_file)
         words = []
         
         start_time = timer()
@@ -403,8 +489,8 @@ if __name__ == "__main__":
         decode_time +=  end_time - start_time
         
         start_time = timer()
-        (state_path, phones) = decoder.backtrace() 
-        words = phones_to_words(phones, phone_to_word, words)
+        (state_path, words) = decoder.backtrace() 
+        #words = phones_to_words(phones, phone_to_word, words)
         end_time = timer()
         backtrace_time += end_time - start_time
 
@@ -421,5 +507,3 @@ if __name__ == "__main__":
     #WER - Accuracy stats
     #backtrace_time, decode_time, forward_ops (avg) - Speed stats
     print(WER, count_states, count_arcs, backtrace_time, decode_time, forward_ops)
-
-
