@@ -320,6 +320,7 @@ def generate_silence(f, start_state, phone, n, end_state):
 
 def generate_word_sequence_recognition_wfst(n, lex):
     """ generate a HMM to recognise any single word sequence for words in the lexicon
+    
     """
     global count_states
     global count_arcs
