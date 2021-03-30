@@ -4,7 +4,6 @@ import wer
 import observation_model
 import openfst_python as fst
 import math
-from collections import _heapq
 from subprocess import check_call
 from IPython.display import Image
 from timeit import default_timer as timer
@@ -130,10 +129,6 @@ class MyViterbiDecoder:
                                 else:
                                     self.W[t][j] = []
         
-        for i, val in enumerate(self.V[t]):
-            _heapq.heappush(self.new_lst, val)
-            print("ABC")
-  
 
     def forward_step_beam_search(self, t):
           
@@ -164,31 +159,6 @@ class MyViterbiDecoder:
         self.new_lst = sorted(range(len(self.V[t])), key=lambda k: self.V[t][k])[:100] 
 
 
-    def forward_step_prun(self, t):
-          
-        for i in self.f.states():
-
-                if not self.V[t-1][i] == self.NLL_ZERO:   # no point in propagating states with zero probability
-                    
-                    for arc in self.f.arcs(i):
-                        
-                        if arc.ilabel != 0: # <eps> transitions don't emit an observation
-                            j = arc.nextstate
-                            tp = float(arc.weight)  # transition prob
-                            ep = -self.om.log_observation_probability(self.f.input_symbols().find(arc.ilabel), t)  # emission negative log prob
-                            prob = tp + ep + self.V[t-1][i] # they're logs
-                            if prob < self.V[t][j]:
-                                self.V[t][j] = prob
-                                self.B[t][j] = i
-                                
-                                # store the output labels encountered too
-                                if arc.olabel !=0:
-                                    self.W[t][j] = [arc.olabel]
-                                else:
-                                    self.W[t][j] = []
-
-        self.new_lst = sorted(range(len(self.V[t])), key=lambda k: self.V[t][k])
-        
 
     def finalise_decoding(self):
         """ this incorporates the probability of terminating at each state
