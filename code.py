@@ -13,6 +13,8 @@ class MyViterbiDecoder:
     
     NLL_ZERO = 1e10  # define a constant representing -log(0).  This is really infinite, but approximate
                      # it here with a very large number
+
+    new_lst = []
     
     def __init__(self, f, audio_file_name):
         """Set up the decoder class with an audio file and WFST f
@@ -107,26 +109,29 @@ class MyViterbiDecoder:
     def forward_step(self, t):
           
         for i in self.f.states():
-            
-            if not self.V[t-1][i] == self.NLL_ZERO:   # no point in propagating states with zero probability
-                
-                for arc in self.f.arcs(i):
+
+            if t==1 or  (i in self.new_lst) :
+
+                if not self.V[t-1][i] == self.NLL_ZERO:   # no point in propagating states with zero probability
                     
-                    if arc.ilabel != 0: # <eps> transitions don't emit an observation
-                        j = arc.nextstate
-                        tp = float(arc.weight)  # transition prob
-                        ep = -self.om.log_observation_probability(self.f.input_symbols().find(arc.ilabel), t)  # emission negative log prob
-                        prob = tp + ep + self.V[t-1][i] # they're logs
-                        if prob < self.V[t][j]:
-                            self.V[t][j] = prob
-                            self.B[t][j] = i
-                            
-                            # store the output labels encountered too
-                            if arc.olabel !=0:
-                                self.W[t][j] = [arc.olabel]
-                            else:
-                                self.W[t][j] = []
-                            
+                    for arc in self.f.arcs(i):
+                        
+                        if arc.ilabel != 0: # <eps> transitions don't emit an observation
+                            j = arc.nextstate
+                            tp = float(arc.weight)  # transition prob
+                            ep = -self.om.log_observation_probability(self.f.input_symbols().find(arc.ilabel), t)  # emission negative log prob
+                            prob = tp + ep + self.V[t-1][i] # they're logs
+                            if prob < self.V[t][j]:
+                                self.V[t][j] = prob
+                                self.B[t][j] = i
+                                
+                                # store the output labels encountered too
+                                if arc.olabel !=0:
+                                    self.W[t][j] = [arc.olabel]
+                                else:
+                                    self.W[t][j] = []
+    
+        self.new_lst = sorted(range(len(self.V[t])), key=lambda k: self.V[t][k])[:100] 
     
     def finalise_decoding(self):
         """ this incorporates the probability of terminating at each state
@@ -155,6 +160,7 @@ class MyViterbiDecoder:
             t += 1
         self.finalise_decoding()
         return t-1
+
     
     def backtrace(self):
         
